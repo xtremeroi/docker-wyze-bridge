@@ -28,32 +28,30 @@ configuration:
   bridge.ip:
     name: Host IP
     description: >-
-      Home Assistant host IP address. Required for in-browser WebRTC
-      playback to work through ingress.
+      Home Assistant host IP address, used in the stream URLs the
+      WebUI displays.
   bridge.auth:
     name: Enable WebUI Auth
-    description: Require HTTP Basic auth for the WebUI and REST API
+    description: >-
+      Must stay on. The hardened bridge refuses to start with it off.
+      Home Assistant ingress (the sidebar panel) does not prompt.
   bridge.username:
     name: WebUI Username
-    description: Username when Enable WebUI Auth is on
+    description: Basic-auth username for the WebUI / REST API on port 5080
   bridge.password:
     name: WebUI Password
-    description: Password when Enable WebUI Auth is on
+    description: Basic-auth password for the WebUI / REST API (12+ characters)
   bridge.api_token:
     name: REST API Token
+    description: Optional bearer token accepted on the REST API in addition to Basic auth
+  bridge.rtsp_username:
+    name: RTSP Username
     description: >-
-      Bearer token required on REST API calls. Independent of the
-      WebUI auth above.
-  bridge.stream_auth:
-    name: Stream Auth
-    description: "Global RTSP/WebRTC consumer credentials (format: user:pass)"
-  bridge.go2rtc_url:
-    name: External go2rtc URL
-    description: >-
-      Use an existing go2rtc instance (e.g. Frigate's) instead of
-      spawning our own. Format: http://host:1984. When set, recording
-      and STREAM_AUTH are ignored — configure those on the remote
-      go2rtc yaml.
+      Required. Username Home Assistant (or any player) uses for
+      rtsp://HOST:8554/<camera>. No ':', '@' or '|'.
+  bridge.rtsp_password:
+    name: RTSP Password
+    description: Required. RTSP password (12+ characters, no '@' or '|').
 
   camera:
     name: Camera Defaults
@@ -218,3 +216,15 @@ configuration:
   debug.force_iotc_detail:
     name: Verbose TUTK Logging
     description: Enable detailed go2rtc TUTK protocol tracing
+
+  go2rtc:
+    name: go2rtc
+    description: >-
+      Embedded go2rtc settings. Its API (port 1984) only listens on
+      127.0.0.1 in this build but still requires Basic auth.
+  go2rtc.api_username:
+    name: go2rtc API Username
+    description: Required. Used only between the bridge and go2rtc.
+  go2rtc.api_password:
+    name: go2rtc API Password
+    description: Required (12+ characters). Used only between the bridge and go2rtc.

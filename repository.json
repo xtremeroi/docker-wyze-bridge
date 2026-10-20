@@ -1,5 +1,5 @@
 {
-  "name": "Wyze Bridge Add-ons",
-  "url": "https://github.com/IDisposable/docker-wyze-bridge",
-  "maintainer": "Marc Brooks (@IDisposable)"
+  "name": "xtremeroi Wyze Bridge (Hardened)",
+  "url": "https://github.com/xtremeroi/docker-wyze-bridge",
+  "maintainer": "xtremeroi (fork of IDisposable/docker-wyze-bridge by Marc Brooks)"
 }

@@ -1,0 +1,5 @@
+# HARDENED: local Supervisor build (no prebuilt image). Same Home
+# Assistant base image upstream's add-on uses, for both architectures.
+build_from:
+  aarch64: ghcr.io/home-assistant/base:3.21
+  amd64: ghcr.io/home-assistant/base:3.21

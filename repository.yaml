@@ -1,3 +1,6 @@
-name: IDisposable Home Assistant Add-ons
-url: https://github.com/IDisposable/docker-wyze-bridge
-maintainer: IDisposable <idisposable@gmail.com>
+# HARDENED fork. Only home_assistant/wyze_bridge_hardened is shipped on this
+# branch; upstream's two add-ons (which pull prebuilt upstream images) were
+# removed so the Home Assistant add-on store lists just the hardened one.
+name: xtremeroi Wyze Bridge (Hardened)
+url: https://github.com/xtremeroi/docker-wyze-bridge
+maintainer: xtremeroi (fork of IDisposable/docker-wyze-bridge)

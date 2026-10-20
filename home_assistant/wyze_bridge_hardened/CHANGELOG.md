@@ -1,6 +1,26 @@
 # Changelog
 
-## 4.6.0
+## 4.6.0-hardened.1
+
+First hardened release, forked from upstream `dev` (4.6.0-edge) with
+upstream `main` (4.6.0-edge.20260924.1038) merged in.
+
+- go2rtc API bound to 127.0.0.1 with no CORS and Basic auth required for
+  every caller (including loopback).
+- go2rtc WebRTC media bound to 127.0.0.1; WebUI player uses MSE over the
+  authenticated `/ws` proxy. go2rtc SRTP/HomeKit listener disabled.
+- RTSP requires `bridge.rtsp_username` / `bridge.rtsp_password`.
+- WebUI / REST API require `bridge.auth` + username/password; Home
+  Assistant ingress is trusted. `/metrics.prom` now needs auth; wildcard
+  CORS removed.
+- Bridge refuses to start when any of the above credentials are missing.
+- Built locally from source (no prebuilt image); go2rtc download is
+  SHA-256 verified.
+- Removed `bridge.go2rtc_url` and free-form `bridge.stream_auth` options;
+  dropped ports 1984, 8888, 8889 and 8189/udp from the published list.
+
+
+## 4.6.0-edge
 
 **go2rtc customization** — three long-standing issues that all
 wanted a piece of the same knob: give the operator control over
@@ -52,7 +72,7 @@ uses the configured ports instead of hard-coded 8554 / 1984.
 	`60`, `60s`, `5m`, and `1d` all work. `60s` used to be ignored,
 	which left snapshots off.
 
-## 4.5.0
+## 4.5.0-edge
 
 Runtime **TUTK → WebRTC auto-fallback** for cameras Wyze crippled
 via firmware. When a TUTK-path camera fails to stream 5 times in
@@ -77,7 +97,7 @@ mars-webcsrv.
 - MIGRATION.md → Known Issues updated to reflect auto-recovery
 	is now the default fix path.
 
-## 4.4.2
+## 4.4.2-edge
 
 Reliability + doc pass driven by open issue triage.
 
@@ -106,7 +126,7 @@ Reliability + doc pass driven by open issue triage.
 	MIGRATION.md → "Known Issues". Runtime auto-fallback is designed
 	for 4.5.
 
-## 4.4.1
+## 4.4.1-edge
 
 Hotfix for [#119](https://github.com/IDisposable/docker-wyze-bridge/issues/119):
 OG cameras (`GW_GC1` / `GW_GC2`) worked on 4.3.0 but broke on 4.4.0
@@ -118,10 +138,11 @@ can drop it.
 - **OG default is now WebRTC** (`GW_GC1`, `GW_GC2`) — no more
 	gwell-proxy sidecar spawn for OG-only fleets.
 
-## 4.4.0
+## 4.4.0-edge
 
 Code-review pass + community PRs: hardening, parity, observability,
-new camera models, and tests across the bridge.
+new camera models, and tests across the bridge. CI appends the
+timestamp suffix on each dev push (e.g. `4.4.0-edge.20260629.0400`).
 
 ### Camera support
 
@@ -281,8 +302,6 @@ while documenting go2rtc-era control boundaries.
 	go2rtc owns the active TUTK session and does not expose a Wyze property-control API.
 - Pan/tilt K110xx command parity and full `{prop}/get` MQTT readback are out of scope
 	for this phase.
-
-
 
 ## 4.2.2
 

@@ -41,8 +41,30 @@ export_opt 'bridge.auth'        BRIDGE_AUTH
 export_opt 'bridge.username'    BRIDGE_USERNAME
 export_opt 'bridge.password'    BRIDGE_PASSWORD
 export_opt 'bridge.api_token'   BRIDGE_API_TOKEN
-export_opt 'bridge.stream_auth' STREAM_AUTH
-export_opt 'bridge.go2rtc_url'  GO2RTC_URL
+
+# HARDENED: RTSP credentials come from two schema fields (password field
+# is masked in the HA UI) and are composed into the single global
+# STREAM_AUTH entry go2rtc supports. '@' and '|' are STREAM_AUTH
+# separators, so they are rejected here with a clear message. The Go
+# bridge re-checks and refuses to start without valid RTSP auth.
+if bashio::config.has_value 'bridge.rtsp_username' && bashio::config.has_value 'bridge.rtsp_password'; then
+    rtsp_user="$(bashio::config 'bridge.rtsp_username')"
+    rtsp_pass="$(bashio::config 'bridge.rtsp_password')"
+    case "${rtsp_user}${rtsp_pass}" in
+        *@*|*'|'*)
+            bashio::exit.nok "bridge.rtsp_username / bridge.rtsp_password may not contain '@' or '|'"
+            ;;
+    esac
+    case "${rtsp_user}" in
+        *:*) bashio::exit.nok "bridge.rtsp_username may not contain ':'" ;;
+    esac
+    export STREAM_AUTH="${rtsp_user}:${rtsp_pass}"
+fi
+
+# HARDENED: trust Home Assistant ingress (requests from the Supervisor at
+# 172.30.32.2 carrying X-Ingress-Path) so the sidebar panel works without
+# a second Basic-auth prompt. HA has already authenticated that user.
+export BRIDGE_TRUST_HA_INGRESS=true
 
 # ── Camera defaults ─────────────────────────────────────────────────────────
 export_opt 'camera.quality' QUALITY
@@ -207,9 +229,21 @@ mkdir -p /media/wyze_bridge/snapshots /media/wyze_bridge/recordings
 (
     bridge_port="${BRIDGE_PORT:-5080}"
     target=/config/wyze_bridge_dashboard.yaml
+    # HARDENED: /dashboard.yaml is behind WebUI auth. Credentials go to
+    # curl on stdin (-K -) so they never appear in the process list.
+    curl_auth() {
+        local esc_user esc_pass
+        if [ -n "${BRIDGE_USERNAME:-}" ] && [ -n "${BRIDGE_PASSWORD:-}" ]; then
+            esc_user=$(printf '%s' "${BRIDGE_USERNAME}" | sed 's/[\\"]/\\&/g')
+            esc_pass=$(printf '%s' "${BRIDGE_PASSWORD}" | sed 's/[\\"]/\\&/g')
+            printf 'user = "%s:%s"\n' "${esc_user}" "${esc_pass}"
+        elif [ -n "${BRIDGE_API_TOKEN:-}" ]; then
+            printf 'header = "Authorization: Bearer %s"\n' "$(printf '%s' "${BRIDGE_API_TOKEN}" | sed 's/[\\"]/\\&/g')"
+        fi
+    }
     for i in $(seq 1 15); do
         sleep 2
-        if curl -fsS "http://127.0.0.1:${bridge_port}/dashboard.yaml" -o "${target}.tmp" 2>/dev/null; then
+        if curl_auth | curl -K - -fsS "http://127.0.0.1:${bridge_port}/dashboard.yaml" -o "${target}.tmp" 2>/dev/null; then
             mv "${target}.tmp" "${target}"
             bashio::log.info "Wrote Lovelace dashboard to ${target}"
             exit 0

@@ -1,12 +1,15 @@
-name: Wyze Bridge
+name: Wyze Bridge (Hardened)
 description: >-
-  WebRTC/RTSP/HLS bridge for Wyze cameras.
-  Stream your Wyze cameras locally without cloud dependencies.
-slug: wyze_bridge
-url: https://github.com/IDisposable/docker-wyze-bridge
-image: ghcr.io/idisposable/docker-wyze-bridge-homeassistant
-version: 4.6.0
-stage: stable
+  RTSP bridge for Wyze cameras (hardened fork of IDisposable's
+  docker-wyze-bridge). go2rtc API, WebRTC and HLS are loopback-only;
+  RTSP and the WebUI require credentials. Built locally from source.
+slug: wyze_bridge_hardened
+url: https://github.com/xtremeroi/docker-wyze-bridge/tree/hardened
+# HARDENED: no `image:` key, so the Supervisor builds this add-on locally
+# from ./Dockerfile (see build.yaml), compiling the bridge from the
+# pinned commit of this fork instead of pulling upstream's prebuilt image.
+version: 4.6.0-hardened.1
+stage: experimental
 arch:
   - amd64
   - aarch64
@@ -19,20 +22,17 @@ ingress: true
 ingress_port: 5080
 panel_icon: mdi:cctv
 watchdog: http://[HOST]:[PORT:5080]/api/health
+# HARDENED: only the authenticated listeners are published. go2rtc's API
+# (1984, which also serves HLS and WebRTC signaling) and WebRTC media
+# (8889) are bound to 127.0.0.1. 8888 and 8189/udp were leftovers from the
+# old MediaMTX bridge; go2rtc never listens on them. With host_network
+# these entries are informational; the bind addresses are what matter.
 ports:
   5080/tcp: 5080
-  1984/tcp: 1984
   8554/tcp: 8554
-  8888/tcp: 8888
-  8889/tcp: 8889
-  8189/udp: 8189
 ports_description:
-  5080/tcp: Bridge WebUI
-  1984/tcp: go2rtc native UI (optional)
-  8554/tcp: RTSP
-  8888/tcp: HLS
-  8889/tcp: WebRTC HTTP
-  8189/udp: WebRTC ICE
+  5080/tcp: Bridge WebUI + REST API (Basic auth / API token)
+  8554/tcp: RTSP (requires bridge.rtsp_username / bridge.rtsp_password)
 map:
   - addon_config:rw
   - media:rw
@@ -44,8 +44,14 @@ options:
     password: ""
     api_id: ""
     api_key: ""
+  # HARDENED: null = must be filled in before the add-on will start.
   bridge:
     ip: ""
+    auth: true
+    username: wyze
+    password: null
+    rtsp_username: null
+    rtsp_password: null
   camera:
     quality: hd
     audio: true
@@ -61,6 +67,8 @@ options:
   models:
     overrides: []
   go2rtc:
+    api_username: go2rtc
+    api_password: null
     extra_streams: []
   debug: {}
 schema:
@@ -70,14 +78,19 @@ schema:
     api_id: str?
     api_key: str?
     totp_key: str?
+  # HARDENED: auth, username, password, rtsp_username and rtsp_password
+  # are required (no trailing ?). The bridge also refuses to start
+  # without them. go2rtc_url (external go2rtc) and stream_auth (free-form
+  # STREAM_AUTH) were removed; run.sh builds STREAM_AUTH from the RTSP
+  # fields.
   bridge:
     ip: 'match(^($|[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$))?'
-    auth: bool?
-    username: str?
-    password: password?
-    api_token: str?
-    stream_auth: str?
-    go2rtc_url: url?
+    auth: bool
+    username: str(1,)
+    password: password(12,)
+    api_token: password?
+    rtsp_username: 'match(^[^:@|\s]+$)'
+    rtsp_password: password(12,)
   camera:
     quality: list(hd|sd)?
     audio: bool?
@@ -135,10 +148,12 @@ schema:
         is_webrtc: bool?
         is_pan: bool?
         is_doorbell: bool?
+  # HARDENED: go2rtc API Basic auth is required (loopback-only API, but
+  # every host-network process shares 127.0.0.1).
   go2rtc:
     api_port: port?
-    api_username: str?
-    api_password: password?
+    api_username: str(1,)
+    api_password: password(12,)
     rtsp_port: port?
     webrtc_port: port?
     extra_streams:
