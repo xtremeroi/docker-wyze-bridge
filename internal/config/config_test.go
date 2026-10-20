@@ -44,7 +44,10 @@ func TestLoadDefaults(t *testing.T) {
 	}
 }
 
-func TestLoadPasswordDerivation(t *testing.T) {
+// HARDENED: the bridge no longer derives BRIDGE_PASSWORD from the
+// local part of WYZE_EMAIL (guessable). It stays empty and
+// ValidateHardened refuses to start.
+func TestLoadPasswordNotDerived(t *testing.T) {
 	t.Setenv("WYZE_EMAIL", "user@example.com")
 	t.Setenv("BRIDGE_PASSWORD", "")
 
@@ -53,8 +56,8 @@ func TestLoadPasswordDerivation(t *testing.T) {
 		t.Fatalf("Load() error: %v", err)
 	}
 
-	if cfg.BridgePassword != "user" {
-		t.Errorf("BridgePassword = %q, want 'user' derived from email", cfg.BridgePassword)
+	if cfg.BridgePassword != "" {
+		t.Errorf("BridgePassword = %q, want empty (no derivation from email)", cfg.BridgePassword)
 	}
 }
 

@@ -25,20 +25,21 @@ func TestConfigBuilder_Build(t *testing.T) {
 	if cfg.Log.Level != "warn" {
 		t.Errorf("Log.Level = %q, want warn", cfg.Log.Level)
 	}
-	if cfg.API.Listen != ":1984" {
-		t.Errorf("API.Listen = %q, want :1984", cfg.API.Listen)
+	// HARDENED: API + WebRTC on loopback, no CORS, no LAN candidate.
+	if cfg.API.Listen != "127.0.0.1:1984" {
+		t.Errorf("API.Listen = %q, want 127.0.0.1:1984", cfg.API.Listen)
 	}
-	if cfg.API.Origin != "*" {
-		t.Errorf("API.Origin = %q, want *", cfg.API.Origin)
+	if cfg.API.Origin != "" {
+		t.Errorf("API.Origin = %q, want empty (no CORS)", cfg.API.Origin)
 	}
 	if cfg.RTSP.Listen != ":8554" {
 		t.Errorf("RTSP.Listen = %q, want :8554", cfg.RTSP.Listen)
 	}
-	if cfg.WebRTC.Listen != ":8889" {
-		t.Errorf("WebRTC.Listen = %q, want :8889", cfg.WebRTC.Listen)
+	if cfg.WebRTC.Listen != "127.0.0.1:8889" {
+		t.Errorf("WebRTC.Listen = %q, want 127.0.0.1:8889", cfg.WebRTC.Listen)
 	}
-	if len(cfg.WebRTC.Candidates) != 1 || cfg.WebRTC.Candidates[0] != "192.168.1.50:8889" {
-		t.Errorf("WebRTC.Candidates = %v, want [192.168.1.50:8889]", cfg.WebRTC.Candidates)
+	if len(cfg.WebRTC.Candidates) != 0 {
+		t.Errorf("WebRTC.Candidates = %v, want none", cfg.WebRTC.Candidates)
 	}
 	if len(cfg.WebRTC.ICEServers) != 1 {
 		t.Errorf("ICEServers length = %d, want 1", len(cfg.WebRTC.ICEServers))
@@ -92,8 +93,8 @@ func TestConfigBuilder_WriteConfig(t *testing.T) {
 	if err := yaml.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("unmarshal written config: %v", err)
 	}
-	if parsed.API.Listen != ":1984" {
-		t.Errorf("parsed API.Listen = %q, want :1984", parsed.API.Listen)
+	if parsed.API.Listen != "127.0.0.1:1984" {
+		t.Errorf("parsed API.Listen = %q, want 127.0.0.1:1984", parsed.API.Listen)
 	}
 }
 

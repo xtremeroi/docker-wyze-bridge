@@ -154,6 +154,8 @@ func NewServer(opts Options) *Server {
 		opts.Config.BridgePassword,
 		opts.Config.BridgeAPIToken,
 	)
+	// HARDENED: HA ingress bypass (only when the add-on's run.sh opts in).
+	s.auth.SetTrustHAIngress(opts.Config.BridgeTrustHAIngress)
 	return s
 }
 
@@ -233,20 +235,13 @@ func (s *Server) logMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// corsMiddleware adds permissive CORS headers so the WebUI can be
-// called from other origins (e.g. Home Assistant dashboards embedding
-// a camera card, or direct API use from other tools).
+// corsMiddleware used to add "Access-Control-Allow-Origin: *" so any
+// web page could call the bridge API from a browser. HARDENED: no CORS
+// headers are sent, so only same-origin pages (the WebUI itself, HA
+// ingress) can read responses. Non-browser clients (curl, Home
+// Assistant integrations, Prometheus) are unaffected by CORS.
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+	return next
 }
 
 type responseWriter struct {
@@ -304,7 +299,10 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// Observability pages
 	mux.HandleFunc("/metrics", s.auth.Wrap(s.handleMetricsPage))
-	mux.HandleFunc("/metrics.prom", s.handlePrometheus) // typically unauthenticated for scrapers
+	// HARDENED: auth-wrapped (upstream left it open for scrapers). It
+	// lists camera names, models and states. Prometheus can send Basic or
+	// Bearer credentials.
+	mux.HandleFunc("/metrics.prom", s.auth.Wrap(s.handlePrometheus))
 	mux.HandleFunc("/dashboard.yaml", s.auth.Wrap(s.handleDashboardYAML))
 
 	// SSE

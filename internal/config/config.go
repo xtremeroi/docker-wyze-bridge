@@ -26,7 +26,14 @@ type Config struct {
 	BridgeUsername string
 	BridgePassword string
 	BridgeAPIToken string // bearer token for REST API
-	STUNServer     string
+
+	// HARDENED: when true, requests proxied by the Home Assistant
+	// Supervisor's ingress (source 172.30.32.2 + X-Ingress-Path header)
+	// skip WebUI auth, because HA has already authenticated the user.
+	// Set by the HA add-on's run.sh only; default false.
+	BridgeTrustHAIngress bool
+
+	STUNServer string
 
 	// Stream Auth — go2rtc RTSP/WebRTC consumer credentials
 	StreamAuth string
@@ -163,7 +170,11 @@ func Load() (*Config, error) {
 		BridgeUsername: env("BRIDGE_USERNAME", "wyze"),
 		BridgePassword: env("BRIDGE_PASSWORD", ""),
 		BridgeAPIToken: env("BRIDGE_API_TOKEN", ""),
-		STUNServer:     env("STUN_SERVER", "stun:stun.l.google.com:19302"),
+
+		// HARDENED: HA ingress trust (set by the add-on's run.sh).
+		BridgeTrustHAIngress: envBool("BRIDGE_TRUST_HA_INGRESS", false),
+
+		STUNServer: env("STUN_SERVER", "stun:stun.l.google.com:19302"),
 
 		// Stream Auth
 		StreamAuth: env("STREAM_AUTH", ""),
@@ -261,11 +272,10 @@ func Load() (*Config, error) {
 		RefreshInterval: envDuration("REFRESH_INTERVAL", 30*time.Minute),
 	}
 
-	// Derive default BRIDGE_PASSWORD from WYZE_EMAIL if not set
-	if cfg.BridgePassword == "" && cfg.WyzeEmail != "" {
-		parts := strings.SplitN(cfg.WyzeEmail, "@", 2)
-		cfg.BridgePassword = parts[0]
-	}
+	// HARDENED: upstream derived a default BRIDGE_PASSWORD from the
+	// local part of WYZE_EMAIL. That password is guessable, so the
+	// hardened build never invents one; ValidateHardened refuses to
+	// start without explicit WebUI credentials.
 
 	// MQTT_HOST presence implies MQTT_ENABLED
 	if cfg.MQTTHost != "" {
@@ -332,4 +342,45 @@ func parseLogLevel(s string) zerolog.Level {
 	default:
 		return zerolog.InfoLevel
 	}
+}
+
+// ValidateHardened is the HARDENED refuse-to-start check. It runs right
+// after Load, before any Wyze login or listener, and returns one error
+// listing every missing protection. It requires WebUI/REST auth
+// (BRIDGE_AUTH=true plus BRIDGE_USERNAME and BRIDGE_PASSWORD, or
+// BRIDGE_API_TOKEN, where token-only disables Basic), go2rtc API Basic
+// auth (GO2RTC_API_USERNAME and GO2RTC_API_PASSWORD), and RTSP auth
+// (STREAM_AUTH is exactly one global "user:password").
+func (c *Config) ValidateHardened() error {
+	var problems []string
+	if !c.BridgeAuth {
+		problems = append(problems, "WebUI auth is required: set BRIDGE_AUTH=true (add-on option bridge.auth)")
+	}
+	hasBasic := c.BridgeUsername != "" && c.BridgePassword != ""
+	if !hasBasic && c.BridgeAPIToken == "" {
+		problems = append(problems, "WebUI credentials are required: set BRIDGE_USERNAME + BRIDGE_PASSWORD and/or BRIDGE_API_TOKEN (add-on options bridge.username / bridge.password / bridge.api_token)")
+	}
+	if c.Go2RTCAPIUsername == "" || c.Go2RTCAPIPassword == "" {
+		problems = append(problems, "go2rtc API auth is required: set GO2RTC_API_USERNAME and GO2RTC_API_PASSWORD (add-on options go2rtc.api_username / go2rtc.api_password)")
+	}
+	if !validGlobalStreamAuth(c.StreamAuth) {
+		problems = append(problems, "RTSP auth is required: set STREAM_AUTH to one global \"user:password\" (no @camera list, no |, no @ in the password) (add-on options bridge.rtsp_username / bridge.rtsp_password)")
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("refusing to start (hardened build): %s", strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+// validGlobalStreamAuth reports whether raw is a single "user:password"
+// entry that go2rtc will apply to its RTSP server. go2rtc only supports
+// one global RTSP credential; per-camera entries were silently ignored
+// upstream, leaving RTSP open.
+func validGlobalStreamAuth(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || strings.ContainsAny(raw, "|@") {
+		return false
+	}
+	user, pass, ok := strings.Cut(raw, ":")
+	return ok && user != "" && pass != ""
 }

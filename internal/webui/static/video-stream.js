@@ -13,6 +13,14 @@ import { VideoRTC } from './video-rtc.js';
 
 if (!customElements.get('video-rtc')) {
     customElements.define('video-rtc', class extends VideoRTC {
+        // HARDENED: go2rtc's WebRTC media listener is bound to 127.0.0.1
+        // in this build, so a LAN browser can never complete ICE. Skip
+        // WebRTC and play MSE (or HLS/MJPEG) over the authenticated
+        // same-origin /ws proxy instead of waiting on a dead candidate.
+        constructor() {
+            super();
+            this.mode = 'mse,hls,mjpeg';
+        }
         static get observedAttributes() { return ['src']; }
         attributeChangedCallback(name, oldValue, newValue) {
             if (name === 'src' && newValue && newValue !== oldValue) {

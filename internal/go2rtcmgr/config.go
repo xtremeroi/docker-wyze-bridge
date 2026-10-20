@@ -14,6 +14,7 @@ type Go2RTCConfig struct {
 	API     APIConfig              `yaml:"api"`
 	RTSP    RTSPConfig             `yaml:"rtsp"`
 	WebRTC  WebRTCConfig           `yaml:"webrtc"`
+	SRTP    SRTPConfig             `yaml:"srtp"` // HARDENED: always emitted, disables go2rtc's default UDP :8443 listener
 	Streams map[string]interface{} `yaml:"streams,omitempty"`
 	Record  *RecordGlobalConfig    `yaml:"record,omitempty"`
 }
@@ -26,7 +27,13 @@ type LogConfig struct {
 // APIConfig controls the go2rtc HTTP API.
 type APIConfig struct {
 	Listen string `yaml:"listen"`
-	Origin string `yaml:"origin"`
+	// HARDENED: omitempty so no `origin:` key is emitted at all. go2rtc
+	// only adds CORS headers when origin == "*"; we never set it.
+	Origin string `yaml:"origin,omitempty"`
+	// HARDENED: go2rtc skips API Basic auth for loopback callers unless
+	// local_auth is true. The add-on runs with host_network, so every
+	// host-network process shares 127.0.0.1; require creds from them too.
+	LocalAuth bool `yaml:"local_auth,omitempty"`
 	// Username/Password enable HTTP Basic auth on /api/*. Empty =
 	// unauthenticated (go2rtc's historical default). Loopback traffic
 	// from wyze-bridge still authenticates the same way — the bridge
@@ -47,6 +54,13 @@ type WebRTCConfig struct {
 	Listen     string      `yaml:"listen"`
 	ICEServers []ICEServer `yaml:"ice_servers,omitempty"`
 	Candidates []string    `yaml:"candidates,omitempty"`
+}
+
+// SRTPConfig controls go2rtc's SRTP (HomeKit) listener. HARDENED:
+// Listen is deliberately not omitempty so an empty value is written
+// and overrides go2rtc's built-in ":8443" default (empty = disabled).
+type SRTPConfig struct {
+	Listen string `yaml:"listen"`
 }
 
 // ICEServer represents a STUN/TURN server.
@@ -263,20 +277,41 @@ func ParseStreamAuth(raw string) []StreamAuthEntry {
 	return entries
 }
 
+// HARDENED: loopbackHost is the only interface the go2rtc API and the
+// WebRTC media listener bind to. The bridge reaches go2rtc via
+// http://127.0.0.1:<api_port> (Manager.APIURL), and browsers reach
+// HLS / MSE / WebRTC signaling only through the authenticated WebUI
+// proxies on :5080 (/hls/, /ws).
+const loopbackHost = "127.0.0.1"
+
 // Build generates the Go2RTCConfig struct.
 func (b *ConfigBuilder) Build() *Go2RTCConfig {
 	cfg := &Go2RTCConfig{
 		Log: LogConfig{Level: b.logLevel},
 		API: APIConfig{
-			Listen:   fmt.Sprintf(":%d", b.apiPort),
-			Origin:   "*", // needed for bridge WebUI on :5080 to use WebRTC player
-			Username: b.apiUsername,
-			Password: b.apiPassword,
+			// HARDENED: was ":%d" (all interfaces) with Origin "*".
+			// Now loopback-only, no CORS, Basic auth enforced for
+			// loopback callers too (local_auth).
+			Listen:    fmt.Sprintf("%s:%d", loopbackHost, b.apiPort),
+			LocalAuth: true,
+			Username:  b.apiUsername,
+			Password:  b.apiPassword,
 		},
+		// RTSP stays on all interfaces (Home Assistant consumes it over
+		// the LAN) but Validate() refuses to run without STREAM_AUTH.
 		RTSP: RTSPConfig{Listen: fmt.Sprintf(":%d", b.rtspPort)},
 		WebRTC: WebRTCConfig{
-			Listen: fmt.Sprintf(":%d", b.webrtcPort),
+			// HARDENED: was ":%d". The WebRTC listener is the ICE media
+			// mux (TCP+UDP), not signaling; signaling goes over the API
+			// (/api/ws, /api/webrtc), now loopback-only. LAN browsers
+			// therefore cannot complete WebRTC and the WebUI player uses
+			// MSE over the authenticated /ws proxy instead. Outgoing
+			// WebRTC (Wyze KVS cameras) uses go2rtc's separate client
+			// API on ephemeral ports and is unaffected.
+			Listen: fmt.Sprintf("%s:%d", loopbackHost, b.webrtcPort),
 		},
+		// HARDENED: disable the SRTP/HomeKit listener (default :8443).
+		SRTP: SRTPConfig{Listen: ""},
 		// Streams is nil when empty so YAML omits the key entirely.
 		// go2rtc parses an empty flow-style `streams: {}` unreliably.
 	}
@@ -287,11 +322,9 @@ func (b *ConfigBuilder) Build() *Go2RTCConfig {
 		}
 	}
 
-	if b.wbIP != "" {
-		cfg.WebRTC.Candidates = []string{
-			fmt.Sprintf("%s:%d", b.wbIP, b.webrtcPort),
-		}
-	}
+	// HARDENED: no LAN ICE candidate (was "<BRIDGE_IP>:<webrtc_port>").
+	// Advertising a LAN address for a loopback-bound listener would only
+	// make browsers wait on a candidate that can never connect.
 
 	// Apply STREAM_AUTH to RTSP config
 	// If there's a single global auth entry (no per-camera restriction), set it on RTSP
@@ -383,5 +416,54 @@ func (b *ConfigBuilder) WriteConfig(path string) error {
 		data = append(data, []byte(b.extraYAML)...)
 	}
 
-	return os.WriteFile(path, data, 0644)
+	// HARDENED: 0600 (was 0644). The file holds the go2rtc API and RTSP
+	// credentials.
+	return os.WriteFile(path, data, 0600)
+}
+
+// hardenedReservedKeys are top-level go2rtc sections GO2RTC_EXTRA_YAML
+// may not redefine, because doing so could re-open a listener on the
+// LAN or drop authentication.
+var hardenedReservedKeys = []string{"api", "rtsp", "webrtc", "srtp", "rtmp", "ngrok", "webtorrent", "homekit"}
+
+// Validate is the HARDENED pre-flight check run before the go2rtc YAML
+// is written. It returns an error describing every missing protection
+// so the bridge can refuse to start instead of running exposed.
+func (b *ConfigBuilder) Validate() error {
+	var problems []string
+	if b.apiUsername == "" || b.apiPassword == "" {
+		problems = append(problems, "go2rtc API Basic auth is required: set GO2RTC_API_USERNAME and GO2RTC_API_PASSWORD (add-on options go2rtc.api_username / go2rtc.api_password)")
+	}
+	if len(b.streamAuth) != 1 || len(b.streamAuth[0].Cameras) != 0 ||
+		b.streamAuth[0].Username == "" || b.streamAuth[0].Password == "" {
+		problems = append(problems, "RTSP auth is required: set STREAM_AUTH to exactly one global \"user:password\" entry with no @camera list and no | separators (add-on options bridge.rtsp_username / bridge.rtsp_password)")
+	}
+	if key := reservedTopLevelKey(b.extraYAML); key != "" {
+		problems = append(problems, fmt.Sprintf("GO2RTC_EXTRA_YAML may not define the top-level %q section in the hardened build", key))
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("refusing to start (hardened build): %s", strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+// reservedTopLevelKey returns the first reserved top-level key found in
+// a YAML fragment, or "". Only unindented `key:` lines count.
+func reservedTopLevelKey(fragment string) string {
+	for _, line := range strings.Split(fragment, "\n") {
+		if line == "" || line[0] == ' ' || line[0] == '\t' || line[0] == '#' {
+			continue
+		}
+		name, _, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		name = strings.Trim(strings.TrimSpace(name), `"'`)
+		for _, k := range hardenedReservedKeys {
+			if strings.EqualFold(name, k) {
+				return k
+			}
+		}
+	}
+	return ""
 }

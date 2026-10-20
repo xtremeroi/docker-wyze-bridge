@@ -45,6 +45,15 @@ func main() {
 		Str("log_level", cfg.LogLevel.String()).
 		Msg("starting wyze-bridge")
 
+	// HARDENED: refuse to start unless WebUI auth, go2rtc API auth and
+	// RTSP (STREAM_AUTH) credentials are all configured. Runs before
+	// any Wyze login or network listener.
+	if err := cfg.ValidateHardened(); err != nil {
+		log.Error().Msg(err.Error())
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+
 	// Context with signal handling
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -726,6 +735,13 @@ func setupGo2RTC(ctx context.Context, cfg *config.Config, camMgr *camera.Manager
 		if info.IsGwell() && !info.IsWebRTCStreamer() {
 			configBuilder.AddStream(go2rtcmgr.StreamEntry{Name: cam.Name()})
 		}
+	}
+
+	// HARDENED: second check on the exact builder state that becomes
+	// go2rtc.yaml (API auth, single global RTSP credential, and no
+	// GO2RTC_EXTRA_YAML override of listener sections).
+	if err := configBuilder.Validate(); err != nil {
+		log.Fatal().Msg(err.Error())
 	}
 
 	go2rtcConfigPath := cfg.StateDir + "/go2rtc.yaml"

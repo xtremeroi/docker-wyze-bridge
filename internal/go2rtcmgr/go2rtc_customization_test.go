@@ -12,14 +12,14 @@ import (
 func TestConfigBuilder_DefaultPorts(t *testing.T) {
 	b := NewConfigBuilder("info", "", "")
 	cfg := b.Build()
-	if cfg.API.Listen != ":1984" {
-		t.Errorf("API.Listen = %q, want :1984", cfg.API.Listen)
+	if cfg.API.Listen != "127.0.0.1:1984" {
+		t.Errorf("API.Listen = %q, want 127.0.0.1:1984", cfg.API.Listen)
 	}
 	if cfg.RTSP.Listen != ":8554" {
 		t.Errorf("RTSP.Listen = %q, want :8554", cfg.RTSP.Listen)
 	}
-	if cfg.WebRTC.Listen != ":8889" {
-		t.Errorf("WebRTC.Listen = %q, want :8889", cfg.WebRTC.Listen)
+	if cfg.WebRTC.Listen != "127.0.0.1:8889" {
+		t.Errorf("WebRTC.Listen = %q, want 127.0.0.1:8889", cfg.WebRTC.Listen)
 	}
 	if b.APIPort() != 1984 {
 		t.Errorf("APIPort() = %d, want 1984", b.APIPort())
@@ -32,7 +32,7 @@ func TestConfigBuilder_OverridePorts(t *testing.T) {
 	b.SetRTSPPort(8555)
 	b.SetWebRTCPort(8890)
 	cfg := b.Build()
-	if cfg.API.Listen != ":1985" || cfg.RTSP.Listen != ":8555" || cfg.WebRTC.Listen != ":8890" {
+	if cfg.API.Listen != "127.0.0.1:1985" || cfg.RTSP.Listen != ":8555" || cfg.WebRTC.Listen != "127.0.0.1:8890" {
 		t.Errorf("listen ports = api=%s rtsp=%s webrtc=%s", cfg.API.Listen, cfg.RTSP.Listen, cfg.WebRTC.Listen)
 	}
 	if b.APIPort() != 1985 {
@@ -52,12 +52,17 @@ func TestConfigBuilder_ZeroPortKeepsDefault(t *testing.T) {
 	}
 }
 
-func TestConfigBuilder_WebRTCCandidateUsesConfiguredPort(t *testing.T) {
+// HARDENED: the WebRTC listener is loopback-only, so no LAN candidate
+// is advertised even when BRIDGE_IP is set.
+func TestConfigBuilder_NoWebRTCCandidateWhenLoopback(t *testing.T) {
 	b := NewConfigBuilder("info", "", "192.168.1.50")
 	b.SetWebRTCPort(8891)
 	cfg := b.Build()
-	if len(cfg.WebRTC.Candidates) != 1 || cfg.WebRTC.Candidates[0] != "192.168.1.50:8891" {
-		t.Errorf("candidates = %v, want [192.168.1.50:8891]", cfg.WebRTC.Candidates)
+	if len(cfg.WebRTC.Candidates) != 0 {
+		t.Errorf("candidates = %v, want none", cfg.WebRTC.Candidates)
+	}
+	if cfg.WebRTC.Listen != "127.0.0.1:8891" {
+		t.Errorf("WebRTC.Listen = %q, want 127.0.0.1:8891", cfg.WebRTC.Listen)
 	}
 }
 
